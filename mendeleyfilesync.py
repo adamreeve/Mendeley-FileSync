@@ -5,24 +5,36 @@ base path by storing the locations in a text database that can by synchronised.
 
 Currently ignores files outside of base path.
 Just adds new files, doesn't clean deleted files.
+
+Designed to be used with something like Unison or DropBox to synchronise the PDF files.
 """
 
 import sqlite3
 import sys,os
+from argparse import ArgumentParser
 
-#parameters
-#path to mendeley database file, eg /home/user/.local/share/data/Mendeley Ltd./Mendeley Desktop/email@domain.com@www.mendeley.com.sqlite
-mendeley_database_path=''
-#path to text database file to store file information, eg /home/user/.mendeley_files.dat
-text_database_path=''
-#base url for storing PDFs on this machine, must start with file:///, the third / is the root directory
-base_url='file:///'
+parser = ArgumentParser(prog="Mendeley Filesync",description="Synchronise the location of files in the Mendeley database using a relative base path.")
+parser.add_argument('mendeley_database',help='Path to the Mendeley sqlite database, eg. "~/.local/share/data/Mendeley Ltd./Mendeley Desktop/you@somewhere.com@www.mendeley.com.sqlite"')
+parser.add_argument('text_database',help="Path to the text datbase used to store file locatiosn",default=os.environ['HOME']+".mendeley_files.dat")
+parser.add_argument('file_path',help="Base path for local PDF file locations")
+parser.add_argument('-d','--dry-run',action='store_const',dest='dryrun',const=True,default=False,help="Print what will happen but don't modify the database")
+args = parser.parse_args()
 
-#default behaviour is to run without making any changes unless the update argument is passed
-if '--update' in sys.argv:
-    dryrun=False
-else:
-    dryrun=True
+mendeley_database_path=os.path.expanduser(args.mendeley_database)
+if not os.path.isfile(mendeley_database_path):
+    sys.stderr.write('File '+str(mendeley_database_path)+' does not exist\n')
+    exit(1)
+
+text_database_path=args.text_database
+
+file_path = os.path.abspath(os.path.expanduser(args.file_path))
+if not os.path.isdir(file_path):
+    sys.stderr.write(str(file_path)+' is not a directory\n')
+    exit(1)
+base_url='file://'+file_path.replace(os.sep,'/')
+if base_url[-1]=='/': base_url=base_url[:-1]
+
+dryrun=args.dryrun
 
 class entry():
     """Store info about a document entry"""
@@ -135,7 +147,8 @@ def update_mendeley_files(c,files):
             else:
                 sys.stderr.write("Warning: File hash already exists for file "+file.name+".\n")
         else:
-            sys.stderr.write("Warning: Document doesn't exist for file "+file.name+".\n")
+            sys.stderr.write("Warning: No Mendeley document for file "+file.name+".\n" \
+                    "Perhaps you need to synchronise your Mendeley desktop first.\n")
 
 if __name__=="__main__":
     #open database connection
@@ -143,7 +156,11 @@ if __name__=="__main__":
     c = connection.cursor()
 
     #loop through all files in DocumentFiles table getting file location and citationKey for document
-    c.execute("select documentId,hash from DocumentFiles")
+    try:
+        c.execute("select documentId,hash from DocumentFiles")
+    except sqlite3.OperationalError:
+        sys.stderr.write('Error reading the Mendeley database, make sure you specified the path correctly.\n')
+        exit(1)
     rows = c.fetchall()
     #doc id, cite key, hash, location
     mendeley_files = [entry(str(get_uuid(c,row[0])),str(get_key(c,row[0])),row[1],get_location(c,row[1])) for row in rows]
@@ -194,7 +211,11 @@ if __name__=="__main__":
         if dryrun:
             location_file=sys.stdout
         else:
-            location_file=open(text_database_path,'w')
+            try:
+                location_file=open(text_database_path,'w')
+            except:
+                sys.stderr.write('Could not open '+text_database_path+' for writing\n')
+                exit(1)
         for file in mendeley_files:
             location_file.write(str(file)+'\n')
         if not dryrun: location_file.close()
