@@ -13,7 +13,7 @@ import sqlite3
 import sys,os
 from argparse import ArgumentParser
 
-parser = ArgumentParser(prog="Mendeley Filesync",description="Synchronise the location of files in the Mendeley database using a relative base path.")
+parser = ArgumentParser(prog="mendeleyfilesync.py",description="Synchronise the location of files in the Mendeley database using a relative base path.")
 parser.add_argument('mendeley_database',help='Path to the Mendeley sqlite database, eg. "~/.local/share/data/Mendeley Ltd./Mendeley Desktop/you@somewhere.com@www.mendeley.com.sqlite"')
 parser.add_argument('text_database',help="Path to the text datbase used to store file locatiosn",default=os.environ['HOME']+".mendeley_files.dat")
 parser.add_argument('file_path',help="Base path for local PDF file locations")
