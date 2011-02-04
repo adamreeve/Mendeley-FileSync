@@ -1,5 +1,5 @@
 Mendeley FileSync
------------------
+=================
 
 This script stores the location of files associated with Mendeley references
 in a text file and then uses that text file to update the files associated with
@@ -13,17 +13,19 @@ Note that you should first synchronise your Mendeley database to get any new ref
 before running this script, as documents won't be added to any references that have
 not first been added to the Mendeley database.
 
-The Mercurial repository for this script is at:
+The Mercurial repository for this script is at::
+
     https://bitbucket.org/adamreeve/mendeley-filesync
 
 Usage
 -----
 
-To run it, use:
+To run it, use::
+
     ./mendeleyfilesync.py mendeley_database text_database file_path
 
-mendeley_database is the path to the sqlite database used by Mendeley, eg:
-"~/.local/share/data/Mendeley Ltd./Mendeley Desktop/you@somewhere.com@www.mendeley.com.sqlite"
+mendeley_database is the path to the sqlite database used by Mendeley, the Mendeley
+website has a FAQ on how to find this file at http://www.mendeley.com/faq/#locate-database.
 
 text_database is the location of a file to store reference locations. This should
 be synchronised along with your documents using Unison/Dropbox etc and run on each computer
