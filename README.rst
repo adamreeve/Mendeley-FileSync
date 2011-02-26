@@ -13,10 +13,6 @@ Note that you should first synchronise your Mendeley database to get any new ref
 before running this script, as documents won't be added to any references that have
 not first been added to the Mendeley database.
 
-The Mercurial repository for this script is at::
-
-    https://bitbucket.org/adamreeve/mendeley-filesync
-
 Usage
 -----
 
