@@ -9,7 +9,10 @@ Just adds new files, doesn't clean deleted files.
 Designed to be used with something like Unison or DropBox to synchronise the PDF files.
 """
 
-import sqlite3
+try:
+    import sqlite3
+except:
+    from pysqlite2 import dbapi2 as sqlite3
 import sys,os
 from argparse import ArgumentParser
 
@@ -36,7 +39,7 @@ if base_url[-1]=='/': base_url=base_url[:-1]
 
 dryrun=args.dryrun
 
-class entry():
+class entry:
     """Store info about a document entry"""
     def __init__(self,*args):
         self.sep=':::' #separator used in the text database

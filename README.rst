@@ -13,6 +13,12 @@ Note that you should first synchronise your Mendeley database to get any new ref
 before running this script, as documents won't be added to any references that have
 not first been added to the Mendeley database.
 
+Requirements
+------------
+
+This script requires Python >= 2.4 and the Python argparse module.
+For versions of Python before 2.5, the pysqlite2 module is required.
+
 Usage
 -----
 
