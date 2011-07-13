@@ -34,7 +34,10 @@ file_path = os.path.abspath(os.path.expanduser(args.file_path))
 if not os.path.isdir(file_path):
     sys.stderr.write(str(file_path)+' is not a directory\n')
     exit(1)
-base_url='file://'+file_path.replace(os.sep,'/')
+#Windows uses file:/// + path, so remove leading / from Linux/Unix paths
+if file_path.startswith('/'):
+    file_path = file_path[1:]
+base_url='file:///'+file_path.replace(os.sep,'/')
 if base_url[-1]=='/': base_url=base_url[:-1]
 
 dryrun=args.dryrun
