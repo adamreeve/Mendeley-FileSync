@@ -25,14 +25,14 @@ args = parser.parse_args()
 
 mendeley_database_path=os.path.expanduser(args.mendeley_database)
 if not os.path.isfile(mendeley_database_path):
-    sys.stderr.write('File '+str(mendeley_database_path)+' does not exist\n')
+    sys.stderr.write('File '+unicode(mendeley_database_path)+' does not exist\n')
     exit(1)
 
 text_database_path=args.text_database
 
 file_path = os.path.abspath(os.path.expanduser(args.file_path))
 if not os.path.isdir(file_path):
-    sys.stderr.write(str(file_path)+' is not a directory\n')
+    sys.stderr.write(unicode(file_path)+' is not a directory\n')
     exit(1)
 #Windows uses file:/// + path, so remove leading / from Linux/Unix paths
 if file_path.startswith('/'):
@@ -47,22 +47,22 @@ class entry:
     def __init__(self,*args):
         self.sep=':::' #separator used in the text database
         if len(args)==4:
-            self.uuid=str(args[0])
-            self.key=str(args[1])
-            self.hash=str(args[2])
-            self.name=str(args[3])
+            self.uuid=unicode(args[0])
+            self.key=unicode(args[1])
+            self.hash=unicode(args[2])
+            self.name=unicode(args[3])
         elif len(args)==1:
             #read from a line in text database
-            (self.uuid,self.key,self.hash,self.name) = str(args[0]).strip().split(self.sep)
+            (self.uuid,self.key,self.hash,self.name) = unicode(args[0]).strip().split(self.sep)
         else:
             raise RuntimeError, "Invalid number of arguments"
 
-    def __str__(self):
+    def __unicode__(self):
         #print in format used by text database
-        return str(self.uuid)+self.sep+\
-            str(self.key)+self.sep+\
-            str(self.hash)+self.sep+\
-            str(self.name)
+        return unicode(self.uuid)+self.sep+\
+            unicode(self.key)+self.sep+\
+            unicode(self.hash)+self.sep+\
+            unicode(self.name)
 
 def remove_base(path):
     """Remove the directory from the file path as stored in the Mendeley database"""
@@ -169,12 +169,12 @@ if __name__=="__main__":
         exit(1)
     rows = c.fetchall()
     #doc id, cite key, hash, location
-    mendeley_files = [entry(str(get_uuid(c,row[0])),str(get_key(c,row[0])),row[1],get_location(c,row[1])) for row in rows]
+    mendeley_files = [entry(unicode(get_uuid(c,row[0])),unicode(get_key(c,row[0])),row[1],get_location(c,row[1])) for row in rows]
 
     if(os.path.isfile(text_database_path)):
         #open and read text database
         location_file=open(text_database_path,'r')
-        text_files = [entry(line) for line in location_file.readlines()]
+        text_files = [entry(line.decode('utf-8')) for line in location_file.readlines()]
         location_file.close()
 
         #append new files in Mendeley to text database
@@ -205,7 +205,7 @@ if __name__=="__main__":
         if not dryrun:
             location_file=open(text_database_path,'w')
             for file in text_files:
-                location_file.write(str(file)+'\n')
+                location_file.write((unicode(file)+u'\n').encode('utf-8'))
             location_file.close()
 
         #commit changes and close database connection
@@ -223,7 +223,7 @@ if __name__=="__main__":
                 sys.stderr.write('Could not open '+text_database_path+' for writing\n')
                 exit(1)
         for file in mendeley_files:
-            location_file.write(str(file)+'\n')
+            location_file.write((unicode(file)+u'\n').encode('utf-8'))
         if not dryrun: location_file.close()
 
 
