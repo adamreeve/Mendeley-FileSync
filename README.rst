@@ -19,6 +19,12 @@ Requirements
 This script requires Python >= 2.4 and the Python argparse module.
 For versions of Python before 2.5, the pysqlite2 module is required.
 
+For recent versions of Mendeley Desktop, the version of SQLite used by Mendeley
+may be incompatible with older versions used by Python. If you get an error about
+the database file being encrypted or not a database then you need to update
+the version of the SQLite library used by Python. For more information see
+https://github.com/adamreeve/Mendeley-FileSync/issues/4.
+
 Usage
 -----
 
