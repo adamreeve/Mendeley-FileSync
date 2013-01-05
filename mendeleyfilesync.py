@@ -53,7 +53,10 @@ class entry:
             self.name=unicode(args[3])
         elif len(args)==1:
             #read from a line in text database
-            (self.uuid,self.key,self.hash,self.name) = unicode(args[0]).strip().split(self.sep)
+            try:
+                (self.uuid,self.key,self.hash,self.name) = unicode(args[0]).strip().split(self.sep)
+            except ValueError:
+                raise ValueError("Invalid database line: %s" % args[0])
         else:
             raise RuntimeError, "Invalid number of arguments"
 
@@ -199,7 +202,7 @@ if __name__=="__main__":
         #so that conflicts can be manually resolved
         different_files = get_different_files(text_files,mendeley_files)
         for file in different_files:
-           sys.stderr.write("Conflict: "+file.name+"\n")
+           sys.stderr.write("Conflict: "+file+"\n")
 
         #write new text file database
         if not dryrun:
