@@ -52,15 +52,15 @@ When running this script, use::
 
     ./mendeleyfilesync.py mendeley_database text_file file_path
 
-- `mendeley_database` is the path to the sqlite database used by Mendeley, the Mendeley
+- ``mendeley_database`` is the path to the sqlite database used by Mendeley, the Mendeley
   website has a FAQ on how to find this file at http://www.mendeley.com/faq/#locate-database.
 
-- `text_file` is the location of a file to store reference locations. This should
+- ``text_file`` is the location of a file to store reference locations. This should
   be synchronised along with your documents using Unison/Dropbox etc and run on each computer
   after synchronising references in Mendeley Desktop.
   On the first run this file will be created.
 
-- `file_path` is the directory where your pdf documents are stored.
+- ``file_path`` is the directory where your pdf documents are stored.
 
-Passing the --dry-run option will just show you what changes would be made but
+Passing the ``--dry-run`` option will just show you what changes would be made but
 won't write to the Mendeley database or the text database.
