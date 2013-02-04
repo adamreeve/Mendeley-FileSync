@@ -14,6 +14,7 @@ try:
 except:
     from pysqlite2 import dbapi2 as sqlite3
 import sys,os
+import urllib
 from argparse import ArgumentParser
 
 parser = ArgumentParser(prog="mendeleyfilesync.py",description="Synchronise the location of files in the Mendeley database using a relative base path.")
@@ -37,8 +38,11 @@ if not os.path.isdir(file_path):
 #Windows uses file:/// + path, so remove leading / from Linux/Unix paths
 if file_path.startswith('/'):
     file_path = file_path[1:]
-base_url='file:///'+file_path.replace(os.sep,'/')
-if base_url[-1]=='/': base_url=base_url[:-1]
+#Convert windows back slashes to forward slashes for url separators
+file_path = file_path.replace(os.sep,'/')
+base_url = 'file:///' + urllib.quote(file_path, safe='/:')
+if base_url[-1] == '/':
+    base_url = base_url[:-1]
 
 dryrun=args.dryrun
 
