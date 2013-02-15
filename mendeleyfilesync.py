@@ -22,6 +22,7 @@ parser.add_argument('mendeley_database',help='Path to the Mendeley sqlite databa
 parser.add_argument('text_database',help="Path to the text datbase used to store file locations, eg. ~/.mendeley_files.dat")
 parser.add_argument('file_path',help="Base path for local PDF file locations")
 parser.add_argument('-d','--dry-run',action='store_const',dest='dryrun',const=True,default=False,help="Print what will happen but don't modify the database")
+parser.add_argument('-f','--force-update',action='store_const',dest='force_update',const=True,default=False,help="Replace file path in Mendeley with path from the text database when there is a conflict")
 args = parser.parse_args()
 
 mendeley_database_path=os.path.expanduser(args.mendeley_database)
@@ -114,16 +115,16 @@ def get_location(c,hash):
 def get_new_files(afiles,bfiles):
     """Compare a list of files and return a list of the new ones"""
     new_files=[]
-    afiles_locations=set([afile.name for afile in afiles])
+    afiles_hashes=set(afile.hash for afile in afiles)
     for file in bfiles:
         #check if file doesn't exist in other list and make sure it isn't
         #outside the base path
-        if file.name not in afiles_locations and file.name.find("file://") < 0:
+        if file.hash not in afiles_hashes and file.name.find("file://") < 0:
             new_files.append(file)
     return new_files
 
 def get_different_files(afiles,bfiles):
-    """Check if any files have changed"""
+    """Check if any file names have changed"""
     different_files=[]
     adict={}
     for afile in afiles:
@@ -131,7 +132,7 @@ def get_different_files(afiles,bfiles):
     for bfile in bfiles:
         if bfile.hash in adict:
             if bfile.name != adict[bfile.hash] and bfile.name.find("file://") < 0:
-                different_files.append(bfile.name)
+                different_files.append(bfile)
     return different_files
 
 def update_mendeley_files(c,files):
@@ -162,6 +163,20 @@ def update_mendeley_files(c,files):
         else:
             sys.stderr.write("Warning: No Mendeley document for file "+file.name+".\n" \
                     "Perhaps you need to synchronise your Mendeley desktop first.\n")
+
+def update_existing_mendeley_file(c, file):
+    """Update the file path for an existing file"""
+
+    if get_id(c, file.uuid):
+        url = base_url + "/" + file.name
+        if dryrun:
+            print "Executing:\n"
+            print "UPDATE Files SET localUrl=%s WHERE hash=%s" % (url, file.hash)
+        else:
+            c.execute("UPDATE Files SET localUrl=? WHERE hash=?", (url, file.hash))
+    else:
+        sys.stderr.write("Warning: No Mendeley document for file "+file.name+".\n" \
+                "Perhaps you need to synchronise your Mendeley desktop first.\n")
 
 if __name__=="__main__":
     #open database connection
@@ -204,9 +219,15 @@ if __name__=="__main__":
 
         #write out any conflicts where files exist in both but have different locations
         #so that conflicts can be manually resolved
-        different_files = get_different_files(text_files,mendeley_files)
-        for file in different_files:
-           sys.stderr.write("Conflict: "+file+"\n")
+        #or override the file path in Mendeley if force_update is set
+        different_files = get_different_files(mendeley_files,text_files)
+        if args.force_update:
+            for file in different_files:
+                sys.stderr.write("Forcing update: %s\n" % file.name)
+                update_existing_mendeley_file(c, file)
+        else:
+            for file in different_files:
+                sys.stderr.write("Conflict: "+file.name+"\n")
 
         #write new text file database
         if not dryrun:
