@@ -155,7 +155,7 @@ def update_mendeley_files(c,files):
                 t = (get_id(c,file.uuid),file.hash)
                 if dryrun:
                     print "Executing:\n"
-                    print "insert into Files (hash,localUrl) values (%s,%s)" % t
+                    print "insert into DocumentFiles (documentId,hash,remoteUrl,unlinked,downloadRestricted) values (%s,%s,'','false','false')" % t
                 else:
                     c.execute("insert into DocumentFiles (documentId,hash,remoteUrl,unlinked,downloadRestricted) values (?,?,'','false','false')",t)
             else:
