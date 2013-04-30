@@ -1,257 +1,401 @@
 #!/usr/bin/env python
 """
-Synchronise the location of files in the Mendeley database using a relative
-base path by storing the locations in a text database that can by synchronised.
+Synchronise the location of files in the Mendeley database using a
+relative base path by storing the locations in a text database that
+can by synchronised.
 
-Currently ignores files outside of base path.
-Just adds new files, doesn't clean deleted files.
+Currently ignores files outside of the base path.
+It will also only add new files, it won't clean deleted files.
 
-Designed to be used with something like Unison or DropBox to synchronise the PDF files.
+Designed to be used with something like Unison or DropBox to
+synchronise the PDF files.
 """
 
+
+from argparse import ArgumentParser
+import os
+import sys
+import urllib
+from itertools import ifilter
 try:
     import sqlite3
 except:
     from pysqlite2 import dbapi2 as sqlite3
-import sys,os
-import urllib
-from argparse import ArgumentParser
 
-parser = ArgumentParser(prog="mendeleyfilesync.py",description="Synchronise the location of files in the Mendeley database using a relative base path.")
-parser.add_argument('mendeley_database',help='Path to the Mendeley sqlite database, eg. "~/.local/share/data/Mendeley Ltd./Mendeley Desktop/you@somewhere.com@www.mendeley.com.sqlite"')
-parser.add_argument('text_database',help="Path to the text datbase used to store file locations, eg. ~/.mendeley_files.dat")
-parser.add_argument('file_path',help="Base path for local PDF file locations")
-parser.add_argument('-d','--dry-run',action='store_const',dest='dryrun',const=True,default=False,help="Print what will happen but don't modify the database")
-parser.add_argument('-f','--force-update',action='store_const',dest='force_update',const=True,default=False,help="Replace file path in Mendeley with path from the text database when there is a conflict")
-args = parser.parse_args()
 
-mendeley_database_path=os.path.expanduser(args.mendeley_database)
-if not os.path.isfile(mendeley_database_path):
-    sys.stderr.write('File '+unicode(mendeley_database_path)+' does not exist\n')
-    exit(1)
+def main():
+    # Parse command line arguments
+    parser = ArgumentParser(
+            prog='mendeleyfilesync.py',
+            description="Synchronise the location of files in the Mendeley "
+                        "database using a relative base path.")
+    parser.add_argument('mendeley_database',
+            help='Path to the Mendeley sqlite database, eg. '
+            '"~/.local/share/data/Mendeley Ltd./Mendeley Desktop/'
+            'you@somewhere.com@www.mendeley.com.sqlite"')
+    parser.add_argument('text_database',
+            help="Path to the text datbase used to store file locations, "
+                 "eg. ~/.mendeley_files.dat")
+    parser.add_argument('file_path',
+            help="Directory used to store PDF files")
+    parser.add_argument('-d', '--dry-run',
+            action='store_const', dest='dry_run',
+            const=True, default=False,
+            help="Display changes that would be made but don't actually "
+                 "modify the database")
+    parser.add_argument('-f', '--force-update',
+            action='store_const', dest='force_update',
+            const=True, default=False,
+            help="Replace file path in Mendeley with path from the text "
+                 "database when there is a conflict")
+    args = parser.parse_args()
 
-text_database_path=args.text_database
+    # Check path to Mendeley database file
+    if not os.path.isfile(args.mendeley_database):
+        sys.stderr.write('File "%s" does not exist\n' % args.mendeley_database)
+        exit(1)
 
-file_path = os.path.abspath(os.path.expanduser(args.file_path))
-if not os.path.isdir(file_path):
-    sys.stderr.write(unicode(file_path)+' is not a directory\n')
-    exit(1)
-#Windows uses file:/// + path, so remove leading / from Linux/Unix paths
-if file_path.startswith('/'):
-    file_path = file_path[1:]
-#Convert windows back slashes to forward slashes for url separators
-file_path = file_path.replace(os.sep,'/')
-base_url = 'file:///' + urllib.quote(file_path, safe='/:')
-if base_url[-1] == '/':
-    base_url = base_url[:-1]
+    # Check path to directory where PDFs are stored
+    if not os.path.isdir(args.file_path):
+        sys.stderr.write('"%s" is not a directory\n' % args.file_path)
+        exit(1)
 
-dryrun=args.dryrun
+    with MendeleyDB(
+            args.mendeley_database,
+            args.file_path,
+            args.dry_run) as mendeley_db:
+        run_synchronisation(
+                mendeley_db, args.text_database,
+                args.dry_run, args.force_update)
 
-class entry:
-    """Store info about a document entry"""
-    def __init__(self,*args):
-        self.sep=':::' #separator used in the text database
-        if len(args)==4:
-            self.uuid=unicode(args[0])
-            self.key=unicode(args[1])
-            self.hash=unicode(args[2])
-            self.name=unicode(args[3])
-        elif len(args)==1:
-            #read from a line in text database
-            try:
-                (self.uuid,self.key,self.hash,self.name) = unicode(args[0]).strip().split(self.sep)
-            except ValueError:
-                raise ValueError("Invalid database line: %s" % args[0])
+
+class MendeleyDB(object):
+    """
+    An interface to the Mendeley database
+    """
+
+    def __init__(self, path, file_path, dry_run=False):
+        self.path = path
+        self.base_url = directory_to_url(file_path)
+        self.dry_run = dry_run
+
+    def __enter__(self):
+        """
+        Open the database connection
+        """
+
+        self.connection = sqlite3.connect(self.path)
+        self.cursor = self.connection.cursor()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """
+        Close the database connection
+        """
+
+        self.connection.commit()
+        self.cursor.close()
+
+    def execute_unsafe(self, statement, values=()):
+        """
+        Execute an SQL statement that may alter data
+
+        If dry_run is set, print the statement and don't execute anything.
+        This is useful for debugging or just for peace of mind.
+        """
+
+        if self.dry_run:
+            s = statement
+            for v in values:
+                s = s.replace('?', '"%s"' % str(v), 1)
+            print("Executing: %s" % s)
         else:
-            raise RuntimeError, "Invalid number of arguments"
+            return self.cursor.execute(statement, values)
 
-    def __unicode__(self):
-        #print in format used by text database
-        return unicode(self.uuid)+self.sep+\
-            unicode(self.key)+self.sep+\
-            unicode(self.hash)+self.sep+\
-            unicode(self.name)
+    def get_document(self, id):
+        """
+        Get a document using the document id
+        """
 
-def remove_base(path):
-    """Remove the directory from the file path as stored in the Mendeley database"""
-    return path.replace(base_url+"/","")
+        self.cursor.execute(
+                "SELECT uuid, citationKey FROM Documents WHERE id = ?", (id, ))
+        result = self.cursor.fetchone()
+        if result:
+            uuid, citation_key = result
+            if citation_key is None:
+                citation_key = ""
+        else:
+            raise KeyError("Could not find document with id %s" % id)
+        return (uuid, citation_key)
 
-def get_key(c,id):
-    """Get the citation key, eg Smith2011. This is only used to make the text database more readable"""
-    c.execute("select citationKey from Documents where id = ?", (id,))
-    result = c.fetchone()
-    if result:
-        return result[0]
-    else:
-        return ""
+    def document_id(self, uuid):
+        """
+        Get the db primary key for a document from the uuid
+        """
 
-def get_uuid(c,id):
-    """Get the unique identifier"""
-    c.execute("select uuid from Documents where id = ?", (id,))
-    result = c.fetchone()
-    if result:
-        return result[0]
-    else:
-        return ""
+        self.cursor.execute(
+                "SELECT id FROM Documents WHERE uuid = ?", (uuid, ))
+        result = self.cursor.fetchone()
+        if result:
+            return result[0]
+        else:
+            raise KeyError("Couldn't find document with uuid %s" % uuid)
 
-def get_id(c,uuid):
-    """Get the document primary key given the uuid"""
-    c.execute("select id from Documents where uuid = ?", (uuid,))
-    result = c.fetchone()
-    if result:
-        return result[0]
-    else:
-        return ""
+    def get_file_name(self, hash):
+        """
+        Find the file name from the file hash
+        """
 
-def get_location(c,hash):
-    """Find the file name for a document using the file hash"""
-    c.execute("select localUrl from Files where hash = ?", (hash,))
-    result = c.fetchone()
-    if result:
-        return remove_base(result[0])
-    else:
-        return ""
+        self.cursor.execute(
+                "SELECT localUrl FROM Files WHERE hash = ?", (hash, ))
+        result = self.cursor.fetchone()
+        if result:
+            full_path = result[0]
+            return full_path.replace(self.base_url + u'/', '')
+        else:
+            raise KeyError("Couldn't find file with hash %s" % hash)
 
-def get_new_files(afiles,bfiles):
-    """Compare a list of files and return a list of the new ones"""
-    new_files=[]
-    afiles_hashes=set(afile.hash for afile in afiles)
-    for file in bfiles:
-        #check if file doesn't exist in other list and make sure it isn't
-        #outside the base path
-        if file.hash not in afiles_hashes and file.name.find("file://") < 0:
-            new_files.append(file)
-    return new_files
+    def document_files(self):
+        """
+        Return all files associated with documents
+        """
 
-def get_different_files(afiles,bfiles):
-    """Check if any file names have changed"""
-    different_files=[]
-    adict={}
-    for afile in afiles:
-        adict[afile.hash]=afile.name
-    for bfile in bfiles:
-        if bfile.hash in adict:
-            if bfile.name != adict[bfile.hash] and bfile.name.find("file://") < 0:
-                different_files.append(bfile)
+        self.cursor.execute("SELECT documentId, hash FROM DocumentFiles")
+        for document_id, file_hash in self.cursor.fetchall():
+            doc_uuid, doc_citation_key = self.get_document(document_id)
+            file_name = self.get_file_name(file_hash)
+            # Some files are not stored locally, so the file name is not set
+            if file_name:
+                yield DocumentFile(
+                        doc_uuid, doc_citation_key, file_hash, file_name)
+
+    def add_file(self, document_file):
+        """
+        Add the file to the database and attach it to the document
+        """
+
+        # Check document exists in Mendeley database
+        try:
+            document_id = self.document_id(document_file.uuid)
+        except KeyError:
+            sys.stderr.write(
+                    "Warning: No Mendeley document for file %s.\n"
+                    "Perhaps you need to synchronise your Mendeley "
+                    "desktop client first.\n" % document_file.name)
+            return
+
+        # Check file doesn't already exist
+        self.cursor.execute(
+                "SELECT hash FROM Files WHERE hash = ?",
+                (document_file.hash, ))
+        result = self.cursor.fetchone()
+        if result:
+            sys.stderr.write("Warning: File hash already exists "
+                    "for file %s.\n" % document_file.name)
+            return
+
+        # Insert file
+        file_url = u'/'.join((self.base_url, document_file.name))
+        self.execute_unsafe(
+            "INSERT INTO Files (hash, localUrl) VALUES (?, ?)",
+            (document_file.hash, file_url))
+
+        # Link file to document
+        self.execute_unsafe(
+            "INSERT INTO DocumentFiles "
+            "(documentId, hash, remoteUrl, unlinked, downloadRestricted) "
+            "VALUES (?, ?, '', 'false', 'false')",
+            (document_id, document_file.hash))
+
+    def update_file(self, document_file):
+        """
+        Update the file path for an existing file
+        """
+
+        file_url = u'/'.join((self.base_url, document_file.name))
+        self.execute_unsafe(
+                "UPDATE Files SET localUrl=? WHERE hash=?",
+                (file_url, document_file.hash))
+
+
+class DocumentFile(object):
+    """
+    A file associated with a reference document
+    for storing in the text database
+    """
+
+    # Separator used in the text database
+    sep = u':::'
+
+    def __init__(self, uuid, key, hash, name):
+        # uuid and key represent document
+        # there may be multiple files with the same document
+        self.uuid = uuid
+        self.key = key
+        # hash and name represent file
+        self.hash = hash
+        self.name = name
+
+    @classmethod
+    def from_text(cls, line):
+        """
+        Initialise a new entry from the text representation
+        """
+
+        try:
+            (uuid, key, hash, name) = line.strip().split(cls.sep)
+        except ValueError:
+            raise ValueError("Invalid database line: %s" % line)
+
+        return cls(uuid, key, hash, name)
+
+    def text_entry(self):
+        """
+        Return a string representing the entry in the
+        format used by text database
+        """
+
+        return self.sep.join((self.uuid, self.key, self.hash, self.name))
+
+    def sort_key(self):
+        """
+        Key used to sort document files in the text database
+        """
+
+        if self.key:
+            return self.key.lower()
+        else:
+            return self.name.lower()
+
+
+def directory_to_url(path):
+    """
+    Convert a directory path to a URL format
+    """
+
+    path = os.path.abspath(path)
+    # Remove leading slash so Linux and Windows paths both
+    # don't have a slash, which can then be added
+    if path.startswith('/'):
+        path = path[1:]
+    # Make sure separators are forward slashes
+    path = path.replace(os.sep, '/')
+    if path.endswith('/'):
+        path = path[:-1]
+    # Url encode special characters
+    url = u'file:///' + urllib.quote(path, safe='/:').decode('ascii')
+
+    return url
+
+
+def relative_file(file):
+    """
+    Check that a file is within the PDF storage directory
+    """
+
+    # If it is, the base path will have been removed
+    return file.name.find(u'file://') < 0
+
+
+def get_new_files(afiles, bfiles):
+    """
+    Compare a list of files and return a list of the new ones
+    """
+
+    afile_hashes = set(afile.hash for afile in afiles)
+
+    # Check that the file doesn't exist in the other set and make sure it
+    # also isn't outside the base path, in which case it's ignored
+    new_files = (file for file in bfiles if
+            file.hash not in afile_hashes)
+
+    return ifilter(relative_file, new_files)
+
+
+def get_different_files(afiles, bfiles):
+    """
+    Check if any file names have changed
+    """
+
+    a_file_names = dict((file.hash, file.name) for file in afiles)
+
+    # Find files with same hash but named differently
+    different_files = (
+            (file, a_file_names[file.hash]) for file in bfiles if
+            file.hash in a_file_names and
+            file.name != a_file_names[file.hash])
+
     return different_files
 
-def update_mendeley_files(c,files):
-    """Update the Mendeley database with any new files from the text database"""
-    for file in files:
-        #check that document exists
-        if get_id(c,file.uuid):
-            t=(file.hash,)
-            c.execute("select hash from Files where hash = ?",t)
-            result = c.fetchone()
-            if not result:
-                #insert into File table
-                t = (file.hash,base_url+"/"+file.name)
-                if dryrun:
-                    print "Executing:\n"
-                    print "insert into Files (hash,localUrl) values (%s,%s)" % t
-                else:
-                    c.execute("insert into Files (hash,localUrl) values (?,?)",t)
-                #insert into DocumentFiles
-                t = (get_id(c,file.uuid),file.hash)
-                if dryrun:
-                    print "Executing:\n"
-                    print "insert into DocumentFiles (documentId,hash,remoteUrl,unlinked,downloadRestricted) values (%s,%s,'','false','false')" % t
-                else:
-                    c.execute("insert into DocumentFiles (documentId,hash,remoteUrl,unlinked,downloadRestricted) values (?,?,'','false','false')",t)
-            else:
-                sys.stderr.write("Warning: File hash already exists for file "+file.name+".\n")
-        else:
-            sys.stderr.write("Warning: No Mendeley document for file "+file.name+".\n" \
-                    "Perhaps you need to synchronise your Mendeley desktop first.\n")
 
-def update_existing_mendeley_file(c, file):
-    """Update the file path for an existing file"""
+def run_synchronisation(mendeley_db, text_database_path,
+        dry_run=False, force_update=False):
+    """
+    Synchronise updates between the Mendeley database and
+    text file database
+    """
 
-    if get_id(c, file.uuid):
-        url = base_url + "/" + file.name
-        if dryrun:
-            print "Executing:\n"
-            print "UPDATE Files SET localUrl=%s WHERE hash=%s" % (url, file.hash)
-        else:
-            c.execute("UPDATE Files SET localUrl=? WHERE hash=?", (url, file.hash))
+    mendeley_entries = set(mendeley_db.document_files())
+
+    if os.path.isfile(text_database_path):
+        with open(text_database_path, 'r') as text_db_file:
+            text_db_entries = set(
+                    DocumentFile.from_text(line.decode('utf-8'))
+                    for line in text_db_file)
     else:
-        sys.stderr.write("Warning: No Mendeley document for file "+file.name+".\n" \
-                "Perhaps you need to synchronise your Mendeley desktop first.\n")
+        # Assume this is the first run and the text database
+        # hast not yet been created
+        print("Creating new text database file.")
+        text_db_entries = set()
 
-if __name__=="__main__":
-    #open database connection
-    connection = sqlite3.connect(mendeley_database_path)
-    c = connection.cursor()
-
-    #loop through all files in DocumentFiles table getting file location and citationKey for document
-    try:
-        c.execute("select documentId,hash from DocumentFiles")
-    except sqlite3.OperationalError:
-        sys.stderr.write('Error reading the Mendeley database, make sure you specified the path correctly.\n')
-        exit(1)
-    rows = c.fetchall()
-    #doc id, cite key, hash, location
-    mendeley_files = [entry(unicode(get_uuid(c,row[0])),unicode(get_key(c,row[0])),row[1],get_location(c,row[1])) for row in rows]
-
-    if(os.path.isfile(text_database_path)):
-        #open and read text database
-        location_file=open(text_database_path,'r')
-        text_files = [entry(line.decode('utf-8')) for line in location_file.readlines()]
-        location_file.close()
-
-        #append new files in Mendeley to text database
-        new_files = get_new_files(text_files,mendeley_files)
-        if len(new_files)==0:
-            print "No new files from Mendeley."
-        else:
-            print "New files from Mendeley:"
-            for f in new_files: print f.name
-        text_files.extend(new_files)
-
-        #update Mendeley database with new files in text database
-        new_files = get_new_files(mendeley_files,text_files)
-        if len(new_files)==0:
-            print "No new files in text database."
-        else:
-            print "New files in text database:"
-            for f in new_files: print f.name
-        update_mendeley_files(c,new_files)
-
-        #write out any conflicts where files exist in both but have different locations
-        #so that conflicts can be manually resolved
-        #or override the file path in Mendeley if force_update is set
-        different_files = get_different_files(mendeley_files,text_files)
-        if args.force_update:
-            for file in different_files:
-                sys.stderr.write("Forcing update: %s\n" % file.name)
-                update_existing_mendeley_file(c, file)
-        else:
-            for file in different_files:
-                sys.stderr.write("Conflict: "+file.name+"\n")
-
-        #write new text file database
-        if not dryrun:
-            location_file=open(text_database_path,'w')
-            for file in text_files:
-                location_file.write((unicode(file)+u'\n').encode('utf-8'))
-            location_file.close()
-
-        #commit changes and close database connection
-        connection.commit()
-        c.close()
+    # Add new files from Mendeley to the text database
+    new_files = set(get_new_files(text_db_entries, mendeley_entries))
+    if new_files:
+        print("New files from Mendeley:")
+        for f in new_files:
+            print(f.name)
+            text_db_entries.add(f)
     else:
-        #file doesn't exist yet, create it now and finish
-        print "Creating new text database file."
-        if dryrun:
-            location_file=sys.stdout
+        print("No new files from Mendeley.")
+
+    # Update Mendeley database with new files from the text database
+    new_files = set(get_new_files(mendeley_entries, text_db_entries))
+    if new_files:
+        print("New files from the text database:")
+        for f in new_files:
+            print(f.name)
+            mendeley_db.add_file(f)
+    else:
+        print("No new files from the text database.")
+
+    # Write out any conflicts where files exist in both but have
+    # different locations, so that conflicts can be manually resolved,
+    # or override the file path in Mendeley if force_update is set
+    different_files = get_different_files(mendeley_entries, text_db_entries)
+    for different_file, conflicting_name in different_files:
+        if force_update:
+            sys.stderr.write(
+                    "Forcing update: %s to %s\n" %
+                    (conflicting_name, different_file.name))
+            mendeley_db.update_file(different_file)
         else:
-            try:
-                location_file=open(text_database_path,'w')
-            except:
-                sys.stderr.write('Could not open '+text_database_path+' for writing\n')
-                exit(1)
-        for file in mendeley_files:
-            location_file.write((unicode(file)+u'\n').encode('utf-8'))
-        if not dryrun: location_file.close()
+            sys.stderr.write(
+                    "Conflict: %s, %s\n" %
+                    (conflicting_name, different_file.name))
+
+    # Write updated text database file
+    text_db_lines = ((file.text_entry() + u'\n').encode('utf-8')
+            for file in sorted(text_db_entries, key=lambda f: f.sort_key()))
+
+    if not dry_run:
+        with open(text_database_path, 'w') as text_db_file:
+            for line in text_db_lines:
+                text_db_file.write(line)
+    else:
+        print("Text file:")
+        for line in text_db_lines:
+            sys.stdout.write(line)
 
 
+if __name__ == '__main__':
+    main()
