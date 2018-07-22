@@ -1,3 +1,7 @@
+**Please note that this script no longer works as of Mendeley version 1.19, because the Mendeley database is now encrypted.** See `this issue`_ for more information.
+
+.. _this issue: https://github.com/adamreeve/Mendeley-FileSync/issues/11
+
 Mendeley FileSync
 =================
 
